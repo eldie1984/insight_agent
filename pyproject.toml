@@ -1,0 +1,35 @@
+[tool.poetry]
+name = "sales-assistant-agent"
+version = "0.1.0"
+description = "Sales Forecast Assistant Agent using LangGraph"
+authors = ["Data/ML Platform Team"]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.10"
+langgraph = "*"
+langchain = "*"
+langchain-core = "*"
+langchain-openai = "*"
+fastapi = "*"
+uvicorn = "*"
+google-cloud-bigquery = "*"
+pydantic = "^2.5.0"
+httpx = "^0.25.0"
+python-dotenv = "^1.0.0"
+pydantic-settings = "^2.1.0"
+langsmith = "^0.1.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+pytest-asyncio = "^0.21.0"
+pytest-cov = "^4.1.0"
+mypy = "^1.7.0"
+ruff = "^0.1.0"
+black = "^23.12.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+
