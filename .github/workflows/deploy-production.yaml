@@ -122,6 +122,18 @@ jobs:
             --cpu=2
             --max-instances=10
             --timeout=300
+          # ADD YOUR ENVIRONMENT VARIABLES HERE:
+          env_vars: |
+            ENVIRONMENT=production
+            LOG_LEVEL=INFO
+            LANGSMITH_TRACING=true
+            LANGSMITH_PROJECT=sales-assistant-agent
+            BIGQUERY_DATASET=bigquery-public-data.iowa_liquor_sales
+            BIGQUERY_TABLE=sales
+            OPENROUTER_MODEL=openai/gpt-3.5-turbo
+            FORECAST_MODEL_ENDPOINT=https://licor-forecaster-x3frbsap4q-uc.a.run.app/predict
+            LANGSMITH_API_KEY=${{ secrets.LANGSMITH_API_KEY }}
+            OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}
 
       # 5. HEALTH CHECK
       - name: Verify Service Health
