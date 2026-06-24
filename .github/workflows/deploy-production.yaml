@@ -120,18 +120,14 @@ jobs:
             --timeout=300
 
       # 5. HEALTH CHECK
-      # 5. HEALTH CHECK
       - name: Verify Service Health
         run: |
           URL="${{ steps.deploy-cloud-run.outputs.url }}/health"
           echo "Checking health at $URL"
           
-          # Fetch a token for the authenticated service account
-          TOKEN=$(gcloud auth print-identity-token)
-          
           for i in {1..5}; do
-            # Securely authenticate the curl request using the token
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $TOKEN" $URL)
+            # Use gcloud to natively execute an authenticated curl request
+            STATUS=$(gcloud dev requests curl --inline-style -s -o /dev/null -w "%{http_code}" "$URL")
             if [ "$STATUS" -eq 200 ]; then
               echo "Health check passed!"
               exit 0
