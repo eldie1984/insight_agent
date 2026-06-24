@@ -4,7 +4,7 @@ Examples of using LangSmith observability with the Sales Assistant Agent.
 These examples demonstrate how to enable, configure, and use LangSmith
 for tracing and debugging the agent.
 """
-import os
+
 from dotenv import load_dotenv
 
 # Load environment variables from .env
@@ -25,7 +25,7 @@ def example_1_enable_langsmith():
     from config import settings
 
     if settings.langsmith_tracing:
-        print(f"✓ LangSmith tracing enabled")
+        print("✓ LangSmith tracing enabled")
         print(f"  Project: {settings.langsmith_project}")
         print(f"  API Key: {settings.langsmith_api_key[:20]}...")
     else:
@@ -144,7 +144,7 @@ def example_5_trace_decorator():
     result = compute_stats([40000, 41000, 42000, 43000])
 
     print("✓ Function traced with @trace_function decorator")
-    print(f"  Function: compute_forecast_stats")
+    print("  Function: compute_forecast_stats")
     print(f"  Result: {result}")
     print("  Check LangSmith for execution trace and latency")
 

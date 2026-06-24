@@ -3,13 +3,13 @@
 Includes LangSmith integration for tracing, debugging, and monitoring
 the LangGraph execution.
 """
+
 import logging
 import time
 from typing import Any, Callable, Dict, Optional
 from functools import wraps
 
-from langsmith import traceable, Client as LangSmithClient
-from langsmith.run_trees import RunTree
+from langsmith import Client as LangSmithClient
 
 from config import settings
 
@@ -60,15 +60,6 @@ class GraphObserver:
             return
 
         try:
-            # Create metadata for the trace
-            metadata = {
-                "thread_id": thread_id,
-                "latency_ms": round(latency_ms, 2),
-                "nodes_executed": nodes_executed,
-                "chart_generated": chart_generated,
-                "num_messages": len(output_state.get("messages", [])),
-            }
-
             # Log to LangSmith via run context
             logger.debug(
                 f"Graph execution traced: {thread_id} | "
@@ -114,13 +105,17 @@ class GraphObserver:
                 metadata["county"] = input_args.get("county")
                 metadata["horizon_days"] = input_args.get("horizon_days")
                 if not error:
-                    metadata["forecast_points"] = len(output) if isinstance(output, list) else 0
+                    metadata["forecast_points"] = (
+                        len(output) if isinstance(output, list) else 0
+                    )
 
             elif tool_name == "get_historical_sales":
                 metadata["county"] = input_args.get("county")
                 metadata["lookback_days"] = input_args.get("lookback_days", 60)
                 if not error:
-                    metadata["historical_points"] = len(output) if isinstance(output, list) else 0
+                    metadata["historical_points"] = (
+                        len(output) if isinstance(output, list) else 0
+                    )
 
             logger.debug(
                 f"Tool execution traced: {tool_name} | "
@@ -147,12 +142,6 @@ class GraphObserver:
             return
 
         try:
-            metadata = {
-                "thread_id": thread_id,
-                "validation_error": validation_error,
-                "resolved_horizon_days": resolved_horizon_days,
-            }
-
             logger.info(
                 f"Validation error logged: {validation_error} "
                 f"(horizon: {resolved_horizon_days} days)"
@@ -175,6 +164,7 @@ def trace_function(name: str) -> Callable:
     Returns:
         Decorator function
     """
+
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         def wrapper(*args, **kwargs) -> Any:
@@ -185,13 +175,19 @@ def trace_function(name: str) -> Callable:
             try:
                 result = func(*args, **kwargs)
                 latency_ms = (time.time() - start_time) * 1000
-                logger.debug(f"Traced function '{name}' completed in {latency_ms:.0f}ms")
+                logger.debug(
+                    f"Traced function '{name}' completed in {latency_ms:.0f}ms"
+                )
                 return result
             except Exception as e:
                 latency_ms = (time.time() - start_time) * 1000
-                logger.error(f"Traced function '{name}' failed after {latency_ms:.0f}ms: {e}")
+                logger.error(
+                    f"Traced function '{name}' failed after {latency_ms:.0f}ms: {e}"
+                )
                 raise
+
         return wrapper
+
     return decorator
 
 

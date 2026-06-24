@@ -5,20 +5,25 @@ from langchain_core.messages import AnyMessage
 
 class ForecastPoint(TypedDict):
     """A single data point for charting (actual or forecast value)."""
-    date: str          # ISO-8601 "YYYY-MM-DD"
+
+    date: str  # ISO-8601 "YYYY-MM-DD"
     value: float
     type: Literal["actual", "forecast"]
 
 
 class SalesAssistantState(TypedDict):
     """State schema for the Sales Assistant agent graph."""
+
     messages: Annotated[list[AnyMessage], add_messages]
 
     # Populated by tool execution / chart builder; consumed by the response payload.
     chart_data: list[ForecastPoint] | None
-    chart_meta: dict | None          # {"county": str, "horizon_days": int, "generated_at": str}
+    chart_meta: dict | None  # {"county": str, "horizon_days": int, "generated_at": str}
 
     # Set during date validation (Section 5); used to short-circuit malformed requests
     # before any tool call is attempted.
     resolved_horizon_days: int | None
     validation_error: str | None
+
+    # Set by route_after_tools when only forecast is available; tells agent to call get_historical_sales
+    needs_historical_data: bool

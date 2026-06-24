@@ -1,0 +1,228 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main" , 'hotfix/**' ]
+
+env:
+  PROJECT_ID: gentle-habitat-499210-h9
+  REGION: us-central1 
+  GAR_LOCATION: us-central1-docker.pkg.dev
+  REPOSITORY: ml-models
+  IMAGE_NAME: licor_forecaster
+  SERVICE_NAME: licor-forecaster
+  GCS_BUCKET: taligent-ml-models
+
+jobs:
+  # 1. RUN TESTS 
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      # FIX: Bumped to latest version for modern Node environments
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: 2.4.1 
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Load cached venv
+        id: cached-poetry-dependencies
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
+
+      - name: Install dependencies
+        # FIX: Removed the 'if' condition so broken cached venvs can be dynamically repaired by Poetry
+        run: poetry install --no-interaction
+
+  # 2. BUILD & PUSH DOCKER IMAGE
+  build-and-push:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: 'projects/1098523474218/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
+          service_account: 'taligent-test@gentle-habitat-499210-h9.iam.gserviceaccount.com'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: |
+          gcloud auth configure-docker ${{ env.GAR_LOCATION }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: serving/dockerfile
+          push: true
+          tags: ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # 3. TRAIN & UPLOAD MODEL TO GCS
+  train-and-upload:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # - name: Set up Python
+      #   uses: actions/setup-python@v5
+      #   with:
+      #     python-version: '3.13'
+
+      # - name: Install Poetry
+      #   uses: snok/install-poetry@v1
+      #   with:
+      #     version: 2.4.1 # FIX: Matched poetry version with the test step
+      #     virtualenvs-create: true
+      #     virtualenvs-in-project: true
+
+      # - name: Load cached venv
+      #   id: cached-poetry-dependencies
+      #   uses: actions/cache@v4
+      #   with:
+      #     path: .venv
+      #     key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
+
+      # - name: Install dependencies
+      #   # FIX: Removed 'if' cache block to guarantee environment stability
+      #   run: poetry install --no-interaction --no-root
+
+      # - name: Train Model
+      #   run: |
+      #     poetry run python training/training.py
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: 'projects/1098523474218/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
+          service_account: 'taligent-test@gentle-habitat-499210-h9.iam.gserviceaccount.com'
+
+      - name: Upload Model to GCS
+        uses: google-github-actions/upload-cloud-storage@v2
+        with:
+          path: models/best_forecast_model.pkl
+          destination: taligent-ml-models/models/licor_forecaster/${{ github.sha }}
+          parent: false
+
+  # 4. DEPLOY TO CLOUD RUN
+  deploy:
+    needs: [build-and-push, train-and-upload]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: 'projects/1098523474218/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
+          service_account: 'taligent-test@gentle-habitat-499210-h9.iam.gserviceaccount.com'
+
+      - name: Deploy to Cloud Run
+        id: deploy-cloud-run
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.SERVICE_NAME }}
+          region: ${{ env.REGION }}
+          image: ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          flags: |
+            --allow-unauthenticated
+            --memory=2Gi
+            --cpu=2
+            --max-instances=10
+            --timeout=300
+          env_vars: |
+            GCS_MODEL_PATH=gs://${{ env.GCS_BUCKET }}/models/licor_forecaster/${{ github.sha }}/best_forecast_model.pkl
+
+      # 5. HEALTH CHECK
+      - name: Verify Service Health
+        run: |
+          URL="${{ steps.deploy-cloud-run.outputs.url }}/health"
+          echo "Checking health at $URL"
+          for i in {1..5}; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" $URL)
+            if [ "$STATUS" -eq 200 ]; then
+              echo "Health check passed!"
+              exit 0
+            fi
+            echo "Health check returned $STATUS. Retrying in 5 seconds..."
+            sleep 5
+          done
+          echo "Health check failed!" && exit 1
+
+  # 6. SLACK NOTIFICATION
+  notify:
+    # FIX: Depend ONLY on the last step in your tree. If 'deploy' finishes, the other needs finished too.
+    needs: [deploy] 
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Determine Workflow Status
+        id: status
+        run: |
+          if [ "${{ needs.deploy.result }}" = "success" ]; then
+            echo "conclusion=success" >> $GITHUB_OUTPUT
+            echo "color=good" >> $GITHUB_OUTPUT
+          else
+            echo "conclusion=failed" >> $GITHUB_OUTPUT
+            echo "color=danger" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send Slack Notification
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          # ADD THESE TWO LINES RIGHT HERE:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          
+          payload: >
+            {
+              "text": "CI/CD Pipeline Execution Status Update",
+              "attachments": [
+                {
+                  "color": "${{ steps.status.outputs.color }}",
+                  "title": "CI/CD Pipeline: ${{ steps.status.outputs.conclusion }}",
+                  "text": "Repository: ${{ github.repository }}\nBranch: ${{ github.ref_name }}\nCommit: ${{ github.sha }}",
+                  "actions": [
+                    {
+                      "type": "button",
+                      "text": "View Workflow Run",
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]
+            }

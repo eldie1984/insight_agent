@@ -4,8 +4,8 @@ FastAPI application for the Sales Assistant Agent.
 Exposes the /chat (streaming SSE) and /chat/sync (non-streaming) endpoints.
 Includes LangSmith observability for tracing and debugging.
 """
+
 from contextlib import asynccontextmanager
-from datetime import date
 import json
 import logging
 import time
@@ -16,7 +16,8 @@ from pydantic import BaseModel
 
 from graph import build_graph
 from config import settings
-from observability import observer, setup_observability
+from observability import observer
+from memory import memory
 
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,7 @@ async def chat_event_generator(thread_id: str, user_message: str):
     Generator that yields SSE events for the /chat endpoint.
 
     Yields events in the format: "event: <type>\ndata: <json>\n\n"
+    Maintains conversation continuity per thread_id.
     """
     from langchain_core.messages import HumanMessage
 
@@ -70,27 +72,49 @@ async def chat_event_generator(thread_id: str, user_message: str):
 
         start_time = time.time()
 
-        # Prepare input state
+        # Get conversation history for this thread
+        conversation_history = memory.get_messages(thread_id)
+
+        # Create new human message
+        user_msg = HumanMessage(content=user_message)
+        memory.add_message(thread_id, user_msg)
+
+        # Prepare input state with full conversation history
         input_state = {
-            "messages": [HumanMessage(content=user_message)],
+            "messages": conversation_history + [user_msg],
             "chart_data": None,
             "chart_meta": None,
             "resolved_horizon_days": None,
             "validation_error": None,
+            "needs_historical_data": False,
         }
 
         # Initial status
         yield f"event: token\ndata: {json.dumps({'text': 'Processing your request...\\n\\n'})}\n\n"
+
+        messages = input_state.get("messages", [])
+        msg_count = len(messages) if isinstance(messages, list) else 0
+        logger.info(
+            f"Thread {thread_id}: Running graph with {msg_count} total messages"
+        )
 
         # Invoke the graph
         output_state = _graph.invoke(input_state)
 
         # Extract reply from output
         reply = ""
+        ai_response_msg = None
+
         for message in reversed(output_state.get("messages", [])):
             if hasattr(message, "content") and isinstance(message.content, str):
                 reply = message.content
+                ai_response_msg = message
                 break
+
+        # Store AI response in conversation history
+        if ai_response_msg:
+            memory.add_message(thread_id, ai_response_msg)
+            logger.info(f"Thread {thread_id}: Stored AI response in memory")
 
         # Stream the reply as tokens (split into words for realistic streaming)
         if reply:
@@ -152,7 +176,7 @@ async def chat_sync(request: ChatRequest) -> ChatSyncResponse:
     Non-streaming chat endpoint (synchronous).
 
     Returns a single JSON object once the graph run completes.
-    Includes LangSmith tracing if enabled.
+    Maintains conversation continuity per thread_id.
     """
     from langchain_core.messages import HumanMessage
 
@@ -161,35 +185,61 @@ async def chat_sync(request: ChatRequest) -> ChatSyncResponse:
         if _graph is None:
             raise RuntimeError("Graph not initialized")
 
-        # Prepare input state for the graph
+        # Get conversation history for this thread
+        conversation_history = memory.get_messages(request.thread_id)
+
+        # Create new human message
+        user_message = HumanMessage(content=request.message)
+        memory.add_message(request.thread_id, user_message)
+
+        # Prepare input state for the graph with full conversation history
         input_state = {
-            "messages": [HumanMessage(content=request.message)],
+            "messages": conversation_history + [user_message],
             "chart_data": None,
             "chart_meta": None,
             "resolved_horizon_days": None,
             "validation_error": None,
+            "needs_historical_data": False,
         }
+
+        messages = input_state.get("messages", [])
+        msg_count = len(messages) if isinstance(messages, list) else 0
+        logger.info(
+            f"Thread {request.thread_id}: Running graph with {msg_count} total messages"
+        )
 
         # Invoke the graph
         output_state = _graph.invoke(input_state)
 
-        logger.info(f"Output state messages count: {len(output_state.get('messages', []))}")
+        logger.info(
+            f"Output state messages count: {len(output_state.get('messages', []))}"
+        )
         logger.info(f"Output state chart_data: {output_state.get('chart_data')}")
         logger.info(f"Output state chart_meta: {output_state.get('chart_meta')}")
 
         # Extract the reply from the last AI message
         reply = ""
+        ai_response_msg = None
+
         for i, message in enumerate(reversed(output_state.get("messages", []))):
-            logger.info(f"Message {i}: type={type(message).__name__}, has_content={hasattr(message, 'content')}")
+            logger.info(
+                f"Message {i}: type={type(message).__name__}, has_content={hasattr(message, 'content')}"
+            )
             if hasattr(message, "content"):
                 logger.info(f"  content type: {type(message.content).__name__}")
                 if isinstance(message.content, str):
                     reply = message.content
+                    ai_response_msg = message
                     logger.info(f"  Found reply: {reply[:100]}")
                     break
 
         if not reply:
             reply = "I couldn't generate a response. Please try again."
+
+        # Store AI response in conversation history
+        if ai_response_msg:
+            memory.add_message(request.thread_id, ai_response_msg)
+            logger.info(f"Thread {request.thread_id}: Stored AI response in memory")
 
         # Build chart if available
         chart = None
@@ -212,7 +262,10 @@ async def chat_sync(request: ChatRequest) -> ChatSyncResponse:
         observer.log_graph_execution(
             thread_id=request.thread_id,
             input_state={"message": request.message},
-            output_state={"reply_length": len(reply), "chart_generated": chart is not None},
+            output_state={
+                "reply_length": len(reply),
+                "chart_generated": chart is not None,
+            },
             latency_ms=latency_ms,
             nodes_executed=["validate_request", "agent", "tools", "chart_builder"],
             chart_generated=chart is not None,
@@ -244,3 +297,28 @@ async def chat_sync(request: ChatRequest) -> ChatSyncResponse:
 async def health_check():
     """Health check endpoint."""
     return {"status": "ok"}
+
+
+@app.get("/conversation/{thread_id}")
+async def get_conversation(thread_id: str):
+    """Get conversation history for a thread."""
+    messages = memory.get_messages(thread_id)
+    summary = memory.get_summary(thread_id)
+
+    # Convert messages to JSON-serializable format
+    messages_json = [
+        {
+            "type": type(msg).__name__,
+            "content": msg.content if hasattr(msg, "content") else None,
+        }
+        for msg in messages
+    ]
+
+    return {"summary": summary, "messages": messages_json}
+
+
+@app.delete("/conversation/{thread_id}")
+async def clear_conversation(thread_id: str):
+    """Clear conversation history for a thread."""
+    memory.clear_thread(thread_id)
+    return {"status": "cleared", "thread_id": thread_id}

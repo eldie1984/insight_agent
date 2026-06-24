@@ -1,0 +1,39 @@
+[MASTER]
+# Use multiple processes to speed up Pylint.
+jobs=1
+
+[MESSAGES CONTROL]
+# Disable the message, report, category or checker with the given id(s).
+disable=
+    C0114,  # missing-module-docstring
+    C0115,  # missing-class-docstring
+    C0116,  # missing-function-docstring
+    C0301,  # line-too-long
+    C0411,  # wrong-import-order
+    C0413,  # wrong-import-position
+    C0415,  # import-outside-toplevel
+    R0402,  # consider-using-from-import
+    R0801,  # duplicate-code
+    R0903,  # too-few-public-methods
+    R0912,  # too-many-branches
+    R0913,  # too-many-arguments
+    R0914,  # too-many-locals
+    R0915,  # too-many-statements
+    R0917,  # too-many-positional-arguments
+    W0404,  # reimported
+    W0603,  # global-statement
+    W0612,  # unused-variable
+    W0613,  # unused-argument
+    W0621,  # redefined-outer-name
+    W0640,  # cell-var-from-loop
+    W0707,  # raise-missing-from
+    W0718,  # broad-exception-caught
+    W0719,  # broad-exception-raised
+    W1201,  # logging-not-lazy
+    W1203,  # logging-fstring-interpolation
+    W1508,  # invalid-envvar-default
+    W1514,  # unspecified-encoding
+    C0103,  # invalid-name
+    E0401,  # import-error
+    E0606,  # possibly-used-before-assignment
+    E0611,  # no-name-in-module

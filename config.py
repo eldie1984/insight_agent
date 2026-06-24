@@ -1,4 +1,5 @@
 """Configuration for the Sales Assistant Agent."""
+
 import os
 import logging
 from pydantic_settings import BaseSettings
@@ -39,12 +40,10 @@ class Settings(BaseSettings):
     langsmith_api_key: str = os.getenv("LANGSMITH_API_KEY", "")
     langsmith_project: str = os.getenv("LANGSMITH_PROJECT", "sales-assistant-agent")
 
-
-
     # Google Cloud Authentication
-    google_application_credentials: str = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
-
-
+    google_application_credentials: str = os.getenv(
+        "GOOGLE_APPLICATION_CREDENTIALS", ""
+    )
 
     class Config:
         env_file = ".env"
@@ -68,8 +67,7 @@ class Settings(BaseSettings):
             os.environ["LANGSMITH_API_KEY"] = self.langsmith_api_key
             os.environ["LANGSMITH_PROJECT"] = self.langsmith_project
 
-            import logging as log
-            log.info(
+            logging.info(
                 f"LangSmith tracing enabled for project: {self.langsmith_project}"
             )
 
