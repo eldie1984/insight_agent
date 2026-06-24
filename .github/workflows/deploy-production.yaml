@@ -9,9 +9,8 @@ env:
   REGION: us-central1 
   GAR_LOCATION: us-central1-docker.pkg.dev
   REPOSITORY: ml-models
-  IMAGE_NAME: licor_forecaster
-  SERVICE_NAME: licor-forecaster
-  GCS_BUCKET: taligent-ml-models
+  IMAGE_NAME: forecast-asistant
+  SERVICE_NAME: forecast-asistant
 
 jobs:
   # 1. RUN TESTS 
@@ -84,61 +83,9 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # 3. TRAIN & UPLOAD MODEL TO GCS
-  train-and-upload:
-    needs: test
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      # - name: Set up Python
-      #   uses: actions/setup-python@v5
-      #   with:
-      #     python-version: '3.13'
-
-      # - name: Install Poetry
-      #   uses: snok/install-poetry@v1
-      #   with:
-      #     version: 2.4.1 # FIX: Matched poetry version with the test step
-      #     virtualenvs-create: true
-      #     virtualenvs-in-project: true
-
-      # - name: Load cached venv
-      #   id: cached-poetry-dependencies
-      #   uses: actions/cache@v4
-      #   with:
-      #     path: .venv
-      #     key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
-
-      # - name: Install dependencies
-      #   # FIX: Removed 'if' cache block to guarantee environment stability
-      #   run: poetry install --no-interaction --no-root
-
-      # - name: Train Model
-      #   run: |
-      #     poetry run python training/training.py
-
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: 'projects/1098523474218/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
-          service_account: 'taligent-test@gentle-habitat-499210-h9.iam.gserviceaccount.com'
-
-      - name: Upload Model to GCS
-        uses: google-github-actions/upload-cloud-storage@v2
-        with:
-          path: models/best_forecast_model.pkl
-          destination: taligent-ml-models/models/licor_forecaster/${{ github.sha }}
-          parent: false
-
   # 4. DEPLOY TO CLOUD RUN
   deploy:
-    needs: [build-and-push, train-and-upload]
+    needs: [build-and-push]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -164,8 +111,6 @@ jobs:
             --cpu=2
             --max-instances=10
             --timeout=300
-          env_vars: |
-            GCS_MODEL_PATH=gs://${{ env.GCS_BUCKET }}/models/licor_forecaster/${{ github.sha }}/best_forecast_model.pkl
 
       # 5. HEALTH CHECK
       - name: Verify Service Health
