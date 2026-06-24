@@ -76,7 +76,6 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: serving/dockerfile
           push: true
           tags: ${{ env.GAR_LOCATION }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           platforms: linux/amd64
